@@ -57,7 +57,9 @@ export class FactoryProcessor
     }
   }
 
-  // Fires on every failed attempt; act only when BullMQ will not retry.
+  // Fires on every failed attempt. The job's state tells whether BullMQ
+  // will retry it ('delayed'/'waiting') or has given up ('failed', also the
+  // case for UnrecoverableError). An event handler must not throw: log instead.
   @OnWorkerEvent('failed')
   async onFailed(job: Job, error: Error): Promise<void> {
     const context = {
@@ -65,40 +67,57 @@ export class FactoryProcessor
       jobId: job.id,
       collection: job.data.collection,
     };
-    const final =
-      error instanceof UnrecoverableError ||
-      job.attemptsMade >= (job.opts.attempts ?? 1);
-    if (!final) {
-      this.logger.warn({
-        message: `attempt ${job.attemptsMade} failed, will retry`,
+    try {
+      if ((await job.getState()) !== 'failed') {
+        this.logger.warn({
+          message: `attempt ${job.attemptsMade} failed, will retry`,
+          ...context,
+          error: error.message,
+        });
+        return;
+      }
+
+      this.logger.error({
+        message: 'job failed permanently',
         ...context,
         error: error.message,
       });
-      return;
-    }
-
-    this.logger.error({
-      message: 'job failed permanently',
-      ...context,
-      error: error.message,
-    });
-    await this.dlq.add(
-      job.name,
-      {
-        ...job.data,
-        failedReason: error.message,
-        attemptsMade: job.attemptsMade,
-      },
-      { jobId: job.id },
-    );
-    if (job.name === BATCH_JOB) {
-      await this.runs.completeJob(job.data.runId, job.id, 'failed');
-    } else {
-      await this.runs.setStatus(
-        job.data.runId,
-        'failed',
-        `dispatch failed: ${error.message}`,
+      await this.dlq.add(
+        job.name,
+        {
+          ...job.data,
+          failedReason: error.message,
+          attemptsMade: job.attemptsMade,
+        },
+        { jobId: job.id },
       );
+      if (job.name === BATCH_JOB) {
+        await this.runs.completeJob(job.data.runId, job.id, 'failed', {
+          errors: [
+            {
+              collection: job.data.collection,
+              jobId: job.id,
+              reason: error.message,
+            },
+          ],
+        });
+      } else {
+        await this.runs.setStatus(
+          job.data.runId,
+          'failed',
+          `dispatch failed: ${error.message}`,
+        );
+      }
+    } catch (handlerError) {
+      this.logger.error({
+        message: 'could not record failed job (DLQ / run update)',
+        ...context,
+        error: error.message,
+        handlerError:
+          handlerError instanceof Error
+            ? handlerError.message
+            : String(handlerError),
+      });
     }
   }
 }

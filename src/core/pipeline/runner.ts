@@ -190,7 +190,9 @@ function deduplicate(candidates: Candidate[]): Candidate[] {
       c.output.sourceSlot ?? null,
       c.key,
     ]);
-    groups.set(id, [...(groups.get(id) ?? []), c]);
+    const group = groups.get(id);
+    if (group) group.push(c);
+    else groups.set(id, [c]);
   }
 
   return [...groups.values()].map((group) => {

@@ -12,6 +12,9 @@ async function bootstrap() {
     logger: WinstonModule.createLogger(winstonConfig),
   });
 
+  // SIGTERM/SIGINT run onModuleDestroy hooks: BullMQ workers finish or
+  // release their active jobs and Mongo connections close cleanly.
+  app.enableShutdownHooks();
   app.use(helmet());
 
   const config = new DocumentBuilder()

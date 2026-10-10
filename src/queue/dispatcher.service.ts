@@ -36,6 +36,26 @@ export class DispatcherService {
       .get(run.provider)
       .sources.map((s) => s.collection);
     const cursor = run.dispatchCursor;
+
+    // Fresh dispatch only: a source with no documents (or a missing
+    // collection: Mongo reads it as empty) means a misconfigured raw DB, not
+    // a successful run with zero counts. Checked before enqueuing anything.
+    if (!cursor) {
+      for (const collection of collections) {
+        if (!(await this.hasDocuments(collection))) {
+          const error = `no source documents found in ${collection}`;
+          await this.runs.setStatus(runId, 'failed', error);
+          this.logger.error({
+            message: 'dispatch aborted',
+            runId,
+            collection,
+            error,
+          });
+          return;
+        }
+      }
+    }
+
     const start = cursor ? collections.indexOf(cursor.collection) : 0;
     let batchNo = cursor?.batchNo ?? 0;
 
@@ -73,5 +93,12 @@ export class DispatcherService {
 
     await this.runs.setJobsTotal(runId, batchNo);
     this.logger.log({ message: 'dispatch finished', runId, jobs: batchNo });
+  }
+
+  private async hasDocuments(collection: string): Promise<boolean> {
+    for await (const ids of this.reader.readIds(collection, { batchSize: 1 })) {
+      return ids.length > 0;
+    }
+    return false;
   }
 }

@@ -63,6 +63,7 @@ export class RunsController {
       counters: run.counters,
       stages: run.stages,
       jobs: run.jobs,
+      errorSample: run.errorSample,
       timings: {
         createdAt,
         startedAt,

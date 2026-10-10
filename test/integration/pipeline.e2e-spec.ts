@@ -307,7 +307,7 @@ describe('pipeline (integration)', () => {
     expect(run.status).toBe('completed');
     expect(run.jobs).toEqual({ total: 5, done: 5, failed: 0 }); // 2 docs per job: 1 + 2 + 2
     expect(run.counters.read).toBe(RAW_DOC_COUNT);
-    expect(run.counters.failed).toBe(3);
+    expect(run.counters.failed).toBe(2); // the empty "Page limit" page is valid
 
     const state = await targetState();
     expect(state.areas.map((a) => [a.externalId, a.name])).toEqual([
@@ -367,11 +367,6 @@ describe('pipeline (integration)', () => {
       .toArray();
     expect(quarantine.map((q) => [q.rawId, q.stage, q.reason])).toEqual([
       [
-        oid(13).toHexString(),
-        'validate',
-        'payload: provider error: "Page limit exceeded."',
-      ],
-      [
         oid(21).toHexString(),
         'normalise',
         expect.stringContaining(
@@ -384,6 +379,23 @@ describe('pipeline (integration)', () => {
         'payload: soft failure: provider says "This is not restaurant page (Talabat)."',
       ],
     ]);
+    expect(run.errorSample.map((e) => e.rawId).sort()).toEqual(
+      quarantine.map((q) => q.rawId).sort(),
+    );
+  });
+
+  it('fails the run when a source collection has no documents', async () => {
+    const parked = `${MENUS}-parked`;
+    await raw.db.collection(MENUS).rename(parked);
+    try {
+      const { runId, jobs } = await dispatch();
+      const run = await runs.findById(runId);
+      expect(jobs).toEqual([]); // nothing enqueued
+      expect(run.status).toBe('failed');
+      expect(run.error).toBe(`no source documents found in ${MENUS}`);
+    } finally {
+      await raw.db.collection(parked).rename(MENUS);
+    }
   });
 
   it('is idempotent: a second run writes nothing and leaves the same documents', async () => {

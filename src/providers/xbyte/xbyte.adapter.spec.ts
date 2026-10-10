@@ -101,7 +101,7 @@ describe('xbyte adapter', () => {
       ]);
     });
 
-    it('rejects a listing page with "Page Error Message"', () => {
+    it('accepts an empty listing page ("Page limit exceeded" with results: [])', () => {
       const result = runBatch(xbyteAdapter, restaurants, [
         raw('r1', {
           params: {
@@ -118,11 +118,29 @@ describe('xbyte adapter', () => {
         }),
       ]);
 
+      expect(result.failures).toEqual([]);
+      expect(result.upserts).toEqual([]);
+      expect(result.counters.validate).toEqual({ in: 1, out: 1, failed: 0 });
+    });
+
+    it('rejects a listing page without results', () => {
+      const result = runBatch(xbyteAdapter, restaurants, [
+        raw('r1', {
+          params: {
+            domain: 'talabat',
+            areaSlug: 'al-zaab',
+            areaId: '1468',
+            page_no: 14,
+          },
+          payload: { error: '' },
+        }),
+      ]);
+
       expect(result.failures).toEqual([
         {
           rawId: 'r1',
           stage: 'validate',
-          reason: 'payload: provider error: "Page limit exceeded."',
+          reason: 'payload: provider error: error field = "", no results',
         },
       ]);
     });

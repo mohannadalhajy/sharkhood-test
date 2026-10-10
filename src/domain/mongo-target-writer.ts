@@ -57,7 +57,9 @@ function groupByCollection(
     const name = ENTITY_COLLECTIONS[upsert.entity];
     if (!name)
       throw new Error(`No target collection for entity "${upsert.entity}"`);
-    groups.set(name, [...(groups.get(name) ?? []), upsert]);
+    const group = groups.get(name);
+    if (group) group.push(upsert);
+    else groups.set(name, [upsert]);
   }
   return groups;
 }

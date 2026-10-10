@@ -63,6 +63,13 @@ export class BatchService {
     await this.runs.completeJob(runId, jobId, 'done', {
       counters,
       stages: result.counters,
+      errors: result.failures.map(({ rawId, stage, reason }) => ({
+        collection,
+        jobId,
+        rawId,
+        stage,
+        reason,
+      })),
     });
     this.logger.log({
       message: 'batch processed',

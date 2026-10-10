@@ -22,6 +22,7 @@ const STAGES: StageName[] = [
   'deduplicate',
   'project',
 ];
+const ERROR_SAMPLE_SIZE = 20;
 const COUNTERS: (keyof RunCounters)[] = [
   'read',
   'transformed',
@@ -45,7 +46,19 @@ const ALL_JOBS_FINISHED = {
 };
 const COMPLETE_IF_FINISHED = {
   $set: {
-    status: { $cond: [ALL_JOBS_FINISHED, 'completed', '$status'] },
+    status: {
+      $cond: [
+        ALL_JOBS_FINISHED,
+        {
+          $cond: [
+            { $gt: ['$jobs.failed', 0] },
+            'completed_with_errors',
+            'completed',
+          ],
+        },
+        '$status',
+      ],
+    },
     finishedAt: { $cond: [ALL_JOBS_FINISHED, '$$NOW', '$finishedAt'] },
   },
 };
@@ -69,6 +82,7 @@ export class MongoRunRepository implements RunRepository {
       counters: zeroCounters(),
       stages: zeroStages(),
       jobs: { total: null, done: 0, failed: 0 },
+      errorSample: [],
       finishedJobIds: [],
       createdAt: new Date(),
     };
@@ -129,11 +143,11 @@ export class MongoRunRepository implements RunRepository {
       [`jobs.${outcome}`]: 1,
     };
     for (const name of COUNTERS) {
-      increments[`counters.${name}`] = delta?.counters[name] ?? 0;
+      increments[`counters.${name}`] = delta?.counters?.[name] ?? 0;
     }
     for (const stage of STAGES) {
       for (const key of ['in', 'out', 'failed'] as const) {
-        increments[`stages.${stage}.${key}`] = delta?.stages[stage][key] ?? 0;
+        increments[`stages.${stage}.${key}`] = delta?.stages?.[stage][key] ?? 0;
       }
     }
     // The filter skips a job that was already counted (retry after a crash
@@ -148,6 +162,20 @@ export class MongoRunRepository implements RunRepository {
             ]),
           ),
           finishedJobIds: { $concatArrays: ['$finishedJobIds', [jobId]] },
+          // Keep only the first ERROR_SAMPLE_SIZE failures of the run.
+          errorSample: {
+            $slice: [
+              {
+                $concatArrays: [
+                  { $ifNull: ['$errorSample', []] },
+                  {
+                    $literal: (delta?.errors ?? []).slice(0, ERROR_SAMPLE_SIZE),
+                  },
+                ],
+              },
+              ERROR_SAMPLE_SIZE,
+            ],
+          },
         },
       },
       COMPLETE_IF_FINISHED,
@@ -168,6 +196,7 @@ function toRun(doc: RunDocument): Run {
     startedAt: doc.startedAt,
     finishedAt: doc.finishedAt,
     error: doc.error,
+    errorSample: doc.errorSample ?? [],
   };
 }
 

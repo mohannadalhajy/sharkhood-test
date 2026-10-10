@@ -29,19 +29,16 @@ export const restaurantsSchema = z.object({
       results: z.array(record).optional(),
     })
     .superRefine((payload, ctx) => {
-      if (payload['Page Error Message'] !== undefined) {
-        ctx.addIssue({
-          code: 'custom',
-          message: `provider error: "${payload['Page Error Message']}"`,
-        });
-      } else if (payload.error !== undefined) {
-        ctx.addIssue({
-          code: 'custom',
-          message: `provider error: error field = ${JSON.stringify(payload.error)}, no results`,
-        });
-      } else if (!payload.results) {
-        ctx.addIssue({ code: 'custom', message: 'results is missing' });
-      }
+      // A page with results (even []) is valid: "Page limit exceeded" with
+      // results: [] is just past the last page and yields no records.
+      if (payload.results) return;
+      const message =
+        payload['Page Error Message'] !== undefined
+          ? `provider error: "${payload['Page Error Message']}", no results`
+          : payload.error !== undefined
+            ? `provider error: error field = ${JSON.stringify(payload.error)}, no results`
+            : 'results is missing';
+      ctx.addIssue({ code: 'custom', message });
     }),
 });
 

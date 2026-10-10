@@ -1,6 +1,11 @@
 import { StageCounters } from '../pipeline/stage';
 
-export type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'completed_with_errors' // all jobs finished, some permanently failed
+  | 'failed'; // the run itself failed (dispatch)
 export type JobOutcome = 'done' | 'failed';
 
 export interface RunCounters {
@@ -25,6 +30,16 @@ export interface DispatchCursor {
   batchNo: number; // next batch number
 }
 
+// One entry of the run's error sample (first N failures, for a quick look;
+// the full list is in quarantine).
+export interface ErrorSample {
+  collection: string;
+  jobId: string;
+  rawId?: string;
+  stage?: string; // pipeline stage, or undefined for a failed job
+  reason: string;
+}
+
 export interface Run {
   id: string;
   provider: string;
@@ -33,6 +48,7 @@ export interface Run {
   stages: StageCounters;
   jobs: RunJobs;
   dispatchCursor?: DispatchCursor;
+  errorSample: ErrorSample[];
   createdAt: Date;
   startedAt?: Date;
   finishedAt?: Date;
@@ -40,8 +56,9 @@ export interface Run {
 }
 
 export interface JobDelta {
-  counters: RunCounters;
-  stages: StageCounters;
+  counters?: RunCounters;
+  stages?: StageCounters;
+  errors?: ErrorSample[]; // appended to errorSample, capped
 }
 
 export interface RunRepository {
@@ -52,8 +69,9 @@ export interface RunRepository {
   // Sets jobs.total and runs the completion check (all jobs may already
   // have finished while the dispatcher was still enqueuing).
   setJobsTotal(id: string, total: number): Promise<void>;
-  // One atomic update: $inc jobs.done/failed and the counters, and set
-  // status 'completed' once done + failed == total. Applied at most once per
+  // One atomic update: $inc jobs.done/failed and the counters, append to
+  // errorSample, and once done + failed == total set status 'completed'
+  // (or 'completed_with_errors' if any job failed). Applied at most once per
   // jobId, so a retried or stalled job cannot double count.
   completeJob(
     id: string,
