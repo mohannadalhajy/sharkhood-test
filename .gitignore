@@ -35,3 +35,9 @@ lerna-debug.log*
 !.vscode/extensions.json
 # Env
 .env
+
+# Archives
+*.zip
+
+# Local assistant instructions
+CLAUDE.md
