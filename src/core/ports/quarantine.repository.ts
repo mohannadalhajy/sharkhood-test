@@ -5,7 +5,8 @@ export interface QuarantineEntry {
   jobId?: string;
   collection: string;
   rawId: string;
-  recordIndex?: number; // set when one record of a multi-record doc failed
+  entity?: string; // set when one record of a multi-record doc failed
+  recordIndex?: number;
   stage: StageName;
   reason: string;
 }
@@ -20,8 +21,8 @@ export interface Page<T> {
 }
 
 export interface QuarantineRepository {
-  // Upsert on (runId, collection, rawId, recordIndex, stage) so a retried
-  // job does not duplicate entries.
+  // Upsert on (runId, collection, rawId, entity, recordIndex, stage) so a
+  // retried job does not duplicate entries.
   addMany(entries: QuarantineEntry[]): Promise<void>;
   findByRun(
     runId: string,
