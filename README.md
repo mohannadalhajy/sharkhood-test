@@ -32,7 +32,15 @@ curl -s "localhost:3000/runs/<runId>/errors?offset=0&limit=20"
 Also available: `GET /health` (Mongo raw + target, Redis) and Swagger at `/docs`.
 `POST /runs` accepts an optional body `{"provider": "xbyte"}`.
 
-To run the app on the host instead: `cp .env.example .env`, set the Mongo port in it, `docker compose up -d mongo redis`, then `npm run start:dev`.
+To run the app on the host instead: `cp .env.example .env` (it uses Mongo on 27018, like the commands above), `docker compose up -d mongo redis`, then `npm run start:dev`.
+
+Run statuses:
+- `queued` → `running`, then one of:
+  - `completed`;
+  - `completed_with_errors` (some jobs failed permanently and went to the DLQ);
+  - `failed` (the dispatch failed, or a source collection has no documents).
+
+`GET /runs/:id` also returns `errorSample`: the first 20 failure reasons.
 
 ## Tests
 
@@ -73,7 +81,7 @@ Validated with Zod at startup (`src/config/env.schema.ts`). **An invalid or miss
 | `areas` | 697 (8 identical snapshots deduplicated) |
 | `restaurants` | 647 (302 from the listing + 345 from menus; the sample has no overlap) |
 | `menu_items` | 28,773 (2,329 promo repeats merged into `categoryKeys`) |
-| Quarantined | 157 = 155 menu soft failures ("This is not restaurant page") + 1 "Page limit exceeded" + 1 listing page with only `error: ""` |
+| Quarantined | 156 = 155 menu soft failures ("This is not restaurant page") + 1 listing page with only `error: ""` (the "Page limit exceeded" page has `results: []`: a valid empty page) |
 | Idempotency | 1st run: written 30,117 · 2nd run: written 0, skipped 30,117, target documents identical |
 
 ## Adding a provider
@@ -108,13 +116,14 @@ Details and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Items removed from a menu are never deleted.** Upserts don't remove stale rows.
 - **The DLQ path is not covered by a test.** The code moves a job to `factory-batches-dlq` after 5 attempts. If Mongo itself is down at that moment, the run's `jobs.failed` is not updated.
 - **Killed jobs recover slowly.** A job killed mid-run comes back only after BullMQ's stall detection (≈30 s).
-- **A run with failed jobs still ends `completed`.** `jobs.failed > 0` shows the failures.
-- **A missing or empty raw collection isn't flagged.** The run completes with zero counts instead of failing.
 - **The listing ↔ menu merge is shown only by the integration fixture.** The sample has no restaurant in both.
 - **The `runs` doc keeps one id per finished job** (`finishedJobIds`). That's fine up to roughly 100k jobs per run; beyond that it should move to its own collection.
 - **`transformed` depends on `BATCH_SIZE`,** because dedupe works per batch. The target state does not.
 - **`POST /runs` has no filters or limits.**
 - **A genuine item rating of 0 can't be told apart from "unrated".**
+- **No validation of the target schema.** The project stage trusts the mapping's output. Next step: a Zod schema per target entity, checked in `project`.
+- **API and worker run in one process.** They can't be scaled separately. Next step: a `ROLE=api|worker` switch that decides which modules load.
+- **Seeding needs Node on the host** (`npm ci`, then `npm run seed`); `docker compose up` alone doesn't load the data.
 
 ## With another week
 
