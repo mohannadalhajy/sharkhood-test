@@ -8,8 +8,7 @@ import {
   QuarantineRepository,
 } from '../core/ports/quarantine.repository';
 import { TARGET_CONNECTION } from '../database/database.constants';
-
-const DUPLICATE_KEY = 11000;
+import { duplicateKeyErrorsOnly } from '../database/mongo-errors';
 
 @Injectable()
 export class MongoQuarantineRepository
@@ -61,10 +60,7 @@ export class MongoQuarantineRepository
       await this.quarantine.bulkWrite(ops, { ordered: false });
     } catch (err) {
       // A concurrent upsert of the same entry already inserted it: fine.
-      const duplicatesOnly =
-        err instanceof mongo.MongoBulkWriteError &&
-        [err.writeErrors].flat().every((e) => e.code === DUPLICATE_KEY);
-      if (!duplicatesOnly) throw err;
+      if (!duplicateKeyErrorsOnly(err)) throw err;
     }
   }
 

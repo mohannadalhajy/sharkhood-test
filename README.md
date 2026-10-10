@@ -104,7 +104,7 @@ Details and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   - items: `{…, restaurantExternalId, externalId}`.
 
   Every write is an upsert on these keys.
-- **Per-source freshness:** a restaurant has `sources.listing` and `sources.menu`. Each write is guarded only by its own source's `fetchedAt` (tie → larger raw `_id`). `name` is derived (menu, else listing), and `areaIds` is an unguarded set union.
+- **Per-source freshness:** a restaurant has `sources.listing` and `sources.menu`. Each write is guarded only by its own source's `fetchedAt` (tie → larger raw `_id`). `name` (menu, else listing) and `url` (listing, else menu) are derived from the per-source values. `areaIds` is an unguarded set union: its **membership** doesn't depend on processing order, but the array **order** does (it's insertion order), so read it as a set.
 - **E11000 retry:** a guarded upsert that hits a duplicate key is retried once; a second E11000 means the stored data is newer → counted as `skipped`.
 - **Range jobs with deterministic ids:**
   - each job is `(afterId, untilId]` of one collection, with id `runId:collection:batchNo`;
@@ -114,14 +114,16 @@ Details and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Known gaps
 
 - **Items removed from a menu are never deleted.** Upserts don't remove stale rows.
-- **The DLQ path is not covered by a test.** The code moves a job to `factory-batches-dlq` after 5 attempts. If Mongo itself is down at that moment, the run's `jobs.failed` is not updated.
+- **Queue tests use an in-memory job collector, not Redis.** The integration test runs the real dispatcher and batch processor, but no test covers BullMQ's own retries, backoff or the move to `factory-batches-dlq`.
+- **DLQ and run bookkeeping are not reconciled.** Adding to the DLQ (Redis) and recording `jobs.failed` (Mongo) are two separate writes. If one fails, nothing repairs it later; the handler only logs. Next step: an outbox, or a reconciler that compares the DLQ with the runs.
 - **Killed jobs recover slowly.** A job killed mid-run comes back only after BullMQ's stall detection (≈30 s).
 - **The listing ↔ menu merge is shown only by the integration fixture.** The sample has no restaurant in both.
 - **The `runs` doc keeps one id per finished job** (`finishedJobIds`). That's fine up to roughly 100k jobs per run; beyond that it should move to its own collection.
 - **`transformed` depends on `BATCH_SIZE`,** because dedupe works per batch. The target state does not.
+- **Counters under retries reflect only the successful attempt.** A failed attempt's partial work (e.g. writes before a crash) isn't counted, and its re-run sees those rows as `skipped`. So `written` can undercount and `skipped` overcount after retries; the target data is still correct.
 - **`POST /runs` has no filters or limits.**
 - **A genuine item rating of 0 can't be told apart from "unrated".**
-- **No validation of the target schema.** The project stage trusts the mapping's output. Next step: a Zod schema per target entity, checked in `project`.
+- **No full target-entity schemas.** Values are checked field by field (types, ranges such as price ≥ 0 and rating 0..5), but no schema validates a whole area, restaurant or item before it's written. Next step: a Zod schema per target entity, checked in `project`.
 - **API and worker run in one process.** They can't be scaled separately. Next step: a `ROLE=api|worker` switch that decides which modules load.
 - **Seeding needs Node on the host** (`npm ci`, then `npm run seed`); `docker compose up` alone doesn't load the data.
 

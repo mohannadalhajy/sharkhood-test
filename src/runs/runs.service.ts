@@ -31,7 +31,21 @@ export class RunsService {
   async start(provider: string): Promise<{ runId: string }> {
     const run = await this.runs.create(provider);
     const data: DispatchJobData = { runId: run.id };
-    await this.queue.add(DISPATCH_JOB, data, { jobId: dispatchJobId(run.id) });
+    try {
+      await this.queue.add(DISPATCH_JOB, data, {
+        jobId: dispatchJobId(run.id),
+      });
+    } catch (err) {
+      // Redis down: never leave a run 'queued' with no job behind it.
+      const message = err instanceof Error ? err.message : String(err);
+      await this.runs.setStatus(run.id, 'failed', `enqueue failed: ${message}`);
+      this.logger.error({
+        message: 'enqueue failed',
+        runId: run.id,
+        error: message,
+      });
+      throw err;
+    }
     this.logger.log({ message: 'run created', runId: run.id, provider });
     return { runId: run.id };
   }

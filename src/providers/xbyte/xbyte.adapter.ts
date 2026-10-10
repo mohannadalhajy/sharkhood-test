@@ -19,7 +19,12 @@ import {
 } from './xbyte.schemas';
 import { categoryKey } from './xbyte.transforms';
 
-const restaurantName = { name: ['sources.menu.name', 'sources.listing.name'] };
+// Fields written by both sources resolve by a fixed preference, from the
+// stored per-source values: the result does not depend on write order.
+const restaurantDerived = {
+  name: ['sources.menu.name', 'sources.listing.name'],
+  url: ['sources.listing.url', 'sources.menu.url'],
+};
 
 const locations: SourceDefinition<LocationsEnvelope> = {
   collection: 'compero-xbyte.xbyte-raw-locations',
@@ -52,7 +57,7 @@ const restaurants: SourceDefinition<RestaurantsEnvelope> = {
       naturalKey: (e) => ({ externalId: e.externalId as number }),
       sourceSlot: 'listing',
       addToSet: ['areaIds'],
-      derived: restaurantName,
+      derived: restaurantDerived,
     },
   ],
 };
@@ -68,15 +73,13 @@ const menus: SourceDefinition<MenusEnvelope> = {
         (env.payload.results ?? []).map((r) => ({
           ...r,
           restaurantUrl: env.params.restaurant_url,
-          coords:
-            r.latitude == null && r.longitude == null
-              ? null
-              : { lat: r.latitude, lng: r.longitude },
+          // toGeoPoint turns a missing/blank coordinate into location: null.
+          coords: { lat: r.latitude, lng: r.longitude },
         })),
       mapping: menuRestaurantMapping,
       naturalKey: (e) => ({ externalId: e.externalId as number }),
       sourceSlot: 'menu',
-      derived: restaurantName,
+      derived: restaurantDerived,
     },
     {
       entity: 'menu_item',

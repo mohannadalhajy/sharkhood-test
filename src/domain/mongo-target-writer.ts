@@ -7,11 +7,10 @@ import {
   WriteSummary,
 } from '../core/ports/target-writer';
 import { TARGET_CONNECTION } from '../database/database.constants';
+import { duplicateKeyErrorsOnly } from '../database/mongo-errors';
 import { ENTITY_COLLECTIONS, TARGET_INDEXES } from './target-collections';
 
 type Op = mongo.AnyBulkWriteOperation<mongo.Document>;
-
-const DUPLICATE_KEY = 11000;
 
 // Implements the TargetWriter contract (see core/ports/target-writer.ts).
 @Injectable()
@@ -153,13 +152,12 @@ async function bulkWrite(
     const result = await collection.bulkWrite(ops, { ordered: false });
     return { summary: summarise(result), duplicates: [] };
   } catch (err) {
-    if (!(err instanceof mongo.MongoBulkWriteError)) throw err;
-    const errors = [err.writeErrors].flat();
-    // Anything other than a duplicate key is a real failure: let the job retry.
-    if (errors.some((e) => e.code !== DUPLICATE_KEY)) throw err;
+    // Anything but "only duplicate keys" is a real failure: let the job retry.
+    const duplicates = duplicateKeyErrorsOnly(err);
+    if (!duplicates) throw err;
     return {
-      summary: summarise(err.result),
-      duplicates: errors.map((e) => ops[e.index]),
+      summary: summarise((err as mongo.MongoBulkWriteError).result),
+      duplicates: duplicates.map((e) => ops[e.index]),
     };
   }
 }

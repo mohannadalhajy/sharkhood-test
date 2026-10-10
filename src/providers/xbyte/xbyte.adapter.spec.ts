@@ -176,7 +176,8 @@ describe('xbyte adapter', () => {
           entity: 'restaurant',
           key: { provider: 'xbyte', platform: 'talabat', externalId: 648607 },
           set: {
-            url: 'https://www.talabat.com/uae/restaurant/648607/sla-restaurant-and-cafe-al-rowdah',
+            'sources.listing.url':
+              'https://www.talabat.com/uae/restaurant/648607/sla-restaurant-and-cafe-al-rowdah',
             'sources.listing.name': 'Sla Restaurant and Cafe',
           },
           addToSet: { areaIds: [1468] },
@@ -197,6 +198,8 @@ describe('xbyte adapter', () => {
       });
       expect(restaurant.set).toMatchObject({
         'sources.menu.name': 'Quick Burger',
+        'sources.menu.url':
+          'https://www.talabat.com/uae/restaurant/34858/quick-burger-business-bay',
         location: {
           type: 'Point',
           coordinates: [55.24161061023747, 25.179146290963214],
@@ -209,7 +212,30 @@ describe('xbyte adapter', () => {
       expect(restaurant.source.slot).toBe('menu');
       expect(restaurant.derived).toEqual({
         name: ['sources.menu.name', 'sources.listing.name'],
+        url: ['sources.listing.url', 'sources.menu.url'],
       });
+    });
+
+    it.each([
+      ['blank latitude', { latitude: '   ' }],
+      ['missing longitude', { longitude: undefined }],
+    ])(
+      'sets location to null for %s (never a 0 coordinate)',
+      (_label, coords) => {
+        const [restaurant] = upsertsOf([menuDoc([], coords)], 'restaurant');
+        expect(restaurant.set.location).toBeNull();
+      },
+    );
+
+    it('rejects a restaurant rating outside 0..5 at normalise', () => {
+      const result = runBatch(xbyteAdapter, menus, [menuDoc([], { rate: 6 })]);
+      expect(result.failures).toEqual([
+        expect.objectContaining({
+          entity: 'restaurant',
+          stage: 'normalise',
+          reason: expect.stringContaining('expected a number in [0, 5], got 6'),
+        }),
+      ]);
     });
 
     it('gives one category_id with two names two distinct keys', () => {
@@ -310,7 +336,12 @@ describe('xbyte adapter', () => {
           {
             category_id: 1,
             category_name: 'Mains',
-            items: [item({ item_id: 1 }), item({ item_id: 2, price: 'free' })],
+            items: [
+              item({ item_id: 1 }),
+              item({ item_id: 2, price: 'free' }),
+              item({ item_id: 3, price: -5 }),
+              item({ item_id: 4, price: '  ' }), // blank is not 0
+            ],
           },
         ]),
       ]);
@@ -321,11 +352,14 @@ describe('xbyte adapter', () => {
           .map((u) => u.key.externalId),
       ).toEqual([1]);
       expect(result.failures).toEqual([
+        expect.objectContaining({ recordIndex: 1, stage: 'normalise' }),
         expect.objectContaining({
-          entity: 'menu_item',
-          recordIndex: 1,
+          recordIndex: 2,
           stage: 'normalise',
+          reason: expect.stringContaining('expected a number >= 0, got -5'),
         }),
+        // Blank is cleaned to null first, so it is a missing required price.
+        expect.objectContaining({ recordIndex: 3, stage: 'map' }),
       ]);
     });
   });

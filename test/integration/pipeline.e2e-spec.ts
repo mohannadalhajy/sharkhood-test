@@ -1,4 +1,5 @@
 import { getQueueToken } from '@nestjs/bullmq';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -348,6 +349,10 @@ describe('pipeline (integration)', () => {
       name: 'Taco Spot',
       areaIds: [1468],
     });
+    // Menu-only restaurant: url falls back to the menu's canonical URL.
+    expect((await restaurant(333)).url).toBe(
+      'https://www.talabat.com/uae/restaurant/333/burger-hub',
+    );
 
     expect(state.menuItems.map((i) => i.externalId)).toEqual([
       9001, 9002, 9101,
@@ -387,13 +392,25 @@ describe('pipeline (integration)', () => {
   it('fails the run when a source collection has no documents', async () => {
     const parked = `${MENUS}-parked`;
     await raw.db.collection(MENUS).rename(parked);
+    // Capture the expected error log instead of printing it.
+    const logError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     try {
       const { runId, jobs } = await dispatch();
       const run = await runs.findById(runId);
       expect(jobs).toEqual([]); // nothing enqueued
       expect(run.status).toBe('failed');
       expect(run.error).toBe(`no source documents found in ${MENUS}`);
+      expect(logError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'dispatch aborted',
+          runId,
+          collection: MENUS,
+        }),
+      );
     } finally {
+      logError.mockRestore();
       await raw.db.collection(parked).rename(MENUS);
     }
   });
