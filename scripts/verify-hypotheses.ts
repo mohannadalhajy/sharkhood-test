@@ -39,6 +39,7 @@ async function main(): Promise<void> {
       await checkLocationSlugs(db, BATCH_SIZE),
       checkReviewsAndRatings(menus),
       checkAddresses(menus, locationNames),
+      checkDuplicateItemFields(menus),
     ];
     const markdown = [
       `# Hypothesis checks: \`${db.databaseName}\``,
@@ -421,6 +422,71 @@ function checkAddresses(menus: Menu[], locationNames: Set<string>): string[] {
         .sort((a, b) => b[1] - a[1])
         .map(([value, n]) => [code(value), String(n)]),
     ),
+  ];
+}
+
+// 9. Do repeated items (same restaurant + item_id) carry different data,
+// e.g. a discounted price under "Offers"?
+function checkDuplicateItemFields(menus: Menu[]): string[] {
+  const FIELDS = ['price', 'item_name', 'description', 'image', 'rating'];
+  type Occurrence = { position: number; category: string; item: Document };
+  const groups = new Map<string, Occurrence[]>();
+  for (const m of menus) {
+    (m.result?.category ?? []).forEach((category, position) => {
+      for (const item of category.items ?? []) {
+        const key = `${m.restaurantId}|${item.item_id}`;
+        const list = groups.get(key) ?? [];
+        list.push({ position, category: category.category_name, item });
+        groups.set(key, list);
+      }
+    });
+  }
+
+  const duplicated = [...groups.entries()].filter(([, occ]) => occ.length > 1);
+  const differing = new Map<string, number>(FIELDS.map((f) => [f, 0]));
+  const priceSamples: string[][] = [];
+  let firstIsCheapest = 0;
+  for (const [key, occ] of duplicated) {
+    for (const field of FIELDS) {
+      if (new Set(occ.map((o) => JSON.stringify(o.item[field]))).size > 1) {
+        increment(differing, field);
+      }
+    }
+    const prices = occ.map((o) => Number(o.item.price));
+    if (new Set(prices).size > 1) {
+      // occ is already in category order (position ascending).
+      if (prices[0] === Math.min(...prices)) firstIsCheapest++;
+      if (priceSamples.length < TOP_N) {
+        priceSamples.push([
+          code(key),
+          occ
+            .map((o) => `#${o.position} ${o.category}: ${o.item.price}`)
+            .join('<br>'),
+        ]);
+      }
+    }
+  }
+
+  const priceDiffs = differing.get('price');
+  return [
+    '## 9. Do repeated items differ between their occurrences?',
+    '',
+    `Groups of (restaurant, item_id) seen more than once: **${duplicated.length}**.`,
+    '',
+    ...table(
+      ['Field', 'Groups where the value differs'],
+      FIELDS.map((f) => [code(f), String(differing.get(f))]),
+    ),
+    '',
+    `Price differs in ${priceDiffs} groups; first occurrence (by category position)` +
+      ` is the cheapest in ${firstIsCheapest} of them.`,
+    '',
+    ...(priceSamples.length === 0
+      ? []
+      : table(
+          ['restaurant|item_id', 'Occurrences (#position category: price)'],
+          priceSamples,
+        )),
   ];
 }
 

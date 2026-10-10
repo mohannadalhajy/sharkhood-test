@@ -146,3 +146,18 @@ Unmatched menus: **31** of 345; distinct unmatched values: **14**.
 | `""` | 1 |
 | `"Sheikh Zayed Road"` | 1 |
 | `"Al Warqa"` | 1 |
+
+## 9. Do repeated items differ between their occurrences?
+
+Groups of (restaurant, item_id) seen more than once: **2266**.
+
+| Field | Groups where the value differs |
+| --- | --- |
+| `price` | 0 |
+| `item_name` | 0 |
+| `description` | 0 |
+| `image` | 0 |
+| `rating` | 0 |
+
+Price differs in 0 groups; first occurrence (by category position) is the cheapest in 0 of them.
+
