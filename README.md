@@ -1,73 +1,125 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# Provider Data Factory
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A NestJS service that reads raw provider dumps from MongoDB (`provider_raw`, read-only), runs them through a deterministic pipeline, and writes a clean, indexed domain model to `provider_target`. BullMQ (Redis) orchestrates the work.
+The core is provider-agnostic. The sample provider (`xbyte`, platform `talabat`) is one adapter plus a declarative mapping.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Design and data analysis: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Evidence for every number: [docs/profile.md](docs/profile.md), [docs/verify.md](docs/verify.md).
 
-## Description
+## Quick start
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Installation
+Requires Docker and Node 20+.
 
 ```bash
-$ npm install
+npm ci
+
+# Mongo, Redis and the app (API on :3000). Mongo is published on host port 27018
+# so it cannot clash with a local mongod on 27017.
+MONGO_HOST_PORT=27018 docker compose up -d --build
+
+# Load the three sample files from data/ into provider_raw (drops and recreates them).
+MONGO_RAW_URI=mongodb://localhost:27018/provider_raw npm run seed
+
+# Trigger a run -> {"runId":"..."}
+npm run run:factory
+
+# Status, counters, per-stage counters, jobs, timings
+curl -s localhost:3000/runs/<runId>
+
+# Quarantined documents, paginated
+curl -s "localhost:3000/runs/<runId>/errors?offset=0&limit=20"
 ```
 
-## Running the app
+Also available: `GET /health` (Mongo raw + target, Redis) and Swagger at `/docs`.
+`POST /runs` accepts an optional body `{"provider": "xbyte"}`.
+
+To run the app on the host instead: `cp .env.example .env`, set the Mongo port in it, `docker compose up -d mongo redis`, then `npm run start:dev`.
+
+## Tests
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm test           # unit: pipeline runner, field mapping, xbyte transforms and adapter
+npm run test:e2e   # integration: full pipeline on mongodb-memory-server (no Redis needed)
 ```
 
-## Test
+The integration test covers:
+- a restaurant merged from the listing and a menu;
+- idempotency;
+- the conflict rule (an older snapshot processed later);
+- crash recovery: the final state equals a clean run.
 
-```bash
-# unit tests
-$ npm run test
+The first `test:e2e` downloads a MongoDB 7.0 binary (~150 MB). The version is pinned in `package.json` because the default 8.x binary needs macOS 14+.
 
-# e2e tests
-$ npm run test:e2e
+## Configuration
 
-# test coverage
-$ npm run test:cov
-```
+Validated with Zod at startup (`src/config/env.schema.ts`). **An invalid or missing value stops the app at boot** with a message naming the variable; it never fails halfway through a run.
 
-## Support
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NODE_ENV` | `development` | `development` \| `production` \| `test` |
+| `PORT` | `3000` | HTTP port |
+| `MONGO_RAW_URI` | required | raw DB (read-only) |
+| `MONGO_TARGET_URI` | required | target DB (domain collections, runs, quarantine) |
+| `REDIS_HOST` / `REDIS_PORT` | required | BullMQ connection |
+| `BATCH_SIZE` | required | documents per job (range size) and cursor batch size |
+| `WORKER_CONCURRENCY` | required | concurrent jobs per worker process |
+| `MONGO_HOST_PORT` | `27017` | docker compose only: host port for Mongo |
+| `LOG_LEVEL` | `debug` / `info` in prod | not validated (read by the logger config) |
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Results on the sample
 
-## Stay in touch
+| | |
+| --- | --- |
+| Raw documents read | 578 (8 locations, 70 listing pages, 500 menus) |
+| `areas` | 697 (8 identical snapshots deduplicated) |
+| `restaurants` | 647 (302 from the listing + 345 from menus; the sample has no overlap) |
+| `menu_items` | 28,773 (2,329 promo repeats merged into `categoryKeys`) |
+| Quarantined | 157 = 155 menu soft failures ("This is not restaurant page") + 1 "Page limit exceeded" + 1 listing page with only `error: ""` |
+| Idempotency | 1st run: written 30,117 · 2nd run: written 0, skipped 30,117, target documents identical |
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Adding a provider
 
-## License
+1. Create `src/providers/<name>/`:
+   - `<name>.schemas.ts`: Zod schemas for each raw collection's envelope;
+   - `<name>.mapping.ts`: declarative field mappings;
+   - `<name>.transforms.ts`: provider-specific value transforms;
+   - `<name>.adapter.ts`: a `ProviderAdapter` listing its sources and, per source, what it extracts, its natural key and its merge options.
+2. Register it in `src/providers/providers.module.ts`.
+3. Trigger it with `POST /runs {"provider": "<name>"}`.
 
-Nest is [MIT licensed](LICENSE).
+Nothing in `src/core` changes. The one exception outside core: a **new entity type** (not area / restaurant / menu item) needs its collection and indexes added in `src/domain/target-collections.ts`.
+
+## Key decisions
+
+Details and reasoning: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Natural keys:**
+  - restaurants: `{provider, platform, externalId}`, where `externalId` is the id parsed from the URL (= `outletCode`);
+  - items: `{…, restaurantExternalId, externalId}`.
+
+  Every write is an upsert on these keys.
+- **Per-source freshness:** a restaurant has `sources.listing` and `sources.menu`. Each write is guarded only by its own source's `fetchedAt` (tie → larger raw `_id`). `name` is derived (menu, else listing), and `areaIds` is an unguarded set union.
+- **E11000 retry:** a guarded upsert that hits a duplicate key is retried once; a second E11000 means the stored data is newer → counted as `skipped`.
+- **Range jobs with deterministic ids:**
+  - each job is `(afterId, untilId]` of one collection, with id `runId:collection:batchNo`;
+  - completion is one atomic, at-most-once-per-job update on the run, so retries never double count.
+- **Pure pipeline:** validate → extract → normalise → map → deduplicate → project has no I/O. Bad documents go to quarantine; only infrastructure errors throw and retry.
+
+## Known gaps
+
+- **Items removed from a menu are never deleted.** Upserts don't remove stale rows.
+- **The DLQ path is not covered by a test.** The code moves a job to `factory-batches-dlq` after 5 attempts. If Mongo itself is down at that moment, the run's `jobs.failed` is not updated.
+- **Killed jobs recover slowly.** A job killed mid-run comes back only after BullMQ's stall detection (≈30 s).
+- **A run with failed jobs still ends `completed`.** `jobs.failed > 0` shows the failures.
+- **A missing or empty raw collection isn't flagged.** The run completes with zero counts instead of failing.
+- **The listing ↔ menu merge is shown only by the integration fixture.** The sample has no restaurant in both.
+- **The `runs` doc keeps one id per finished job** (`finishedJobIds`). That's fine up to roughly 100k jobs per run; beyond that it should move to its own collection.
+- **`transformed` depends on `BATCH_SIZE`,** because dedupe works per batch. The target state does not.
+- **`POST /runs` has no filters or limits.**
+- **A genuine item rating of 0 can't be told apart from "unrated".**
+
+## With another week
+
+- `lastSeenAt` per item (or a soft delete) to handle items removed from a menu.
+- A metrics endpoint (Prometheus): jobs, throughput, quarantine rate, retry and DLQ counts.
+- Structured JSON logs everywhere. Today, worker and dispatcher lines carry `runId` / `jobId` / `collection`, and logs are JSON in production and in `logs/*.log`; there is no HTTP request logging yet.
+- A load test at 1000× the sample, to tune `BATCH_SIZE`, concurrency and bulk-write sizes.
+- A provider registry driven by config instead of a code list.
