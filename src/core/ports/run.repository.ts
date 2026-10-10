@@ -12,17 +12,17 @@ export interface RunCounters {
 }
 
 export interface RunJobs {
-  total: number;
+  total: number | null; // null until the dispatcher has enqueued every job
   done: number;
   failed: number;
 }
 
-// Where the dispatcher stopped paging, so a restarted dispatcher continues
-// with the same batch numbers (and therefore the same job ids).
+// Where the dispatcher stopped, so a restarted dispatcher continues with
+// the same batch numbers (and therefore the same job ids).
 export interface DispatchCursor {
   collection: string;
   afterId?: string;
-  batchNo: number;
+  batchNo: number; // next batch number
 }
 
 export interface Run {
@@ -39,16 +39,26 @@ export interface Run {
   error?: string;
 }
 
+export interface JobDelta {
+  counters: RunCounters;
+  stages: StageCounters;
+}
+
 export interface RunRepository {
   create(provider: string): Promise<Run>;
   findById(id: string): Promise<Run | null>;
   setStatus(id: string, status: RunStatus, error?: string): Promise<void>;
-  addCounters(
-    id: string,
-    delta: { counters: Partial<RunCounters>; stages?: Partial<StageCounters> },
-  ): Promise<void>;
   saveDispatchCursor(id: string, cursor: DispatchCursor): Promise<void>;
-  // $inc jobs.done or jobs.failed, and in the same atomic update set status
-  // 'completed' once done + failed == total. Returns the updated run.
-  completeJob(id: string, outcome: JobOutcome): Promise<Run>;
+  // Sets jobs.total and runs the completion check (all jobs may already
+  // have finished while the dispatcher was still enqueuing).
+  setJobsTotal(id: string, total: number): Promise<void>;
+  // One atomic update: $inc jobs.done/failed and the counters, and set
+  // status 'completed' once done + failed == total. Applied at most once per
+  // jobId, so a retried or stalled job cannot double count.
+  completeJob(
+    id: string,
+    jobId: string,
+    outcome: JobOutcome,
+    delta?: JobDelta,
+  ): Promise<void>;
 }

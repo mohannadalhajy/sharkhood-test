@@ -7,7 +7,7 @@ import {
   RAW_CONNECTION,
   TARGET_CONNECTION,
 } from '../database/database.constants';
-import { INGEST_QUEUE } from '../queue/queue.constants';
+import { FACTORY_QUEUE } from '../queue/queue.constants';
 
 export type DependencyStatus = 'up' | 'down';
 
@@ -23,7 +23,7 @@ export class HealthService {
   constructor(
     @InjectConnection(RAW_CONNECTION) private readonly raw: Connection,
     @InjectConnection(TARGET_CONNECTION) private readonly target: Connection,
-    @InjectQueue(INGEST_QUEUE) private readonly queue: Queue,
+    @InjectQueue(FACTORY_QUEUE) private readonly queue: Queue,
   ) {}
 
   async check(): Promise<HealthReport> {

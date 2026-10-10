@@ -10,7 +10,10 @@ export interface ReadOptions {
 }
 
 // Read-only. Batches come in ascending _id order, so the last id of a
-// processed batch is a valid checkpoint.
+// batch is a valid range boundary / checkpoint.
 export interface RawSourceReader {
   read(collection: string, options: ReadOptions): AsyncIterable<RawDocument[]>;
+  // Same order and batching, _ids only: lets the dispatcher cut ranges
+  // without loading documents.
+  readIds(collection: string, options: ReadOptions): AsyncIterable<string[]>;
 }

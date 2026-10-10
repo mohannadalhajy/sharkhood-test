@@ -2,8 +2,9 @@
 // restarted job reprocesses exactly the same documents.
 export interface BatchJob {
   runId: string;
+  provider: string;
   collection: string;
-  batchNo: number;
+  batchNo: number; // global across the run's collections
   afterId?: string; // exclusive; undefined = start of collection
   untilId: string; // inclusive
 }

@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Env } from '../config/env.schema';
+import { RAW_SOURCE_READER } from '../core/ports/tokens';
 import { RAW_CONNECTION, TARGET_CONNECTION } from './database.constants';
+import { MongoRawSourceReader } from './mongo-raw-source-reader';
 
 @Module({
   imports: [
@@ -24,5 +26,7 @@ import { RAW_CONNECTION, TARGET_CONNECTION } from './database.constants';
       }),
     }),
   ],
+  providers: [{ provide: RAW_SOURCE_READER, useClass: MongoRawSourceReader }],
+  exports: [RAW_SOURCE_READER],
 })
 export class DatabaseModule {}

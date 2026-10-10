@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node scripts/seed-raw.ts",
     "profile": "ts-node scripts/profile-raw.ts",
-    "verify": "ts-node scripts/verify-hypotheses.ts"
+    "verify": "ts-node scripts/verify-hypotheses.ts",
+    "run:factory": "curl -sS -X POST http://localhost:${PORT:-3000}/runs -H 'content-type: application/json' -d '{}' && echo"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",
